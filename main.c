@@ -3,6 +3,12 @@
   * file    main.c
   * author  A.Jaworowski
   *
+  * version v1.2.1
+  * date	2015-01-15
+  * brief	Bugfix. Handles occasions when button is pushed longer than 10s
+  * Solution: v1.2. New board! Malin tested the program on another board, no
+  * problems with extreme TIM3 values
+  *
   * version	v1.2
   * date	2015-01-20
   * brief	Can measure during 10s
@@ -72,6 +78,9 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
+const uint16_t PRESCALER = 32000;
+const uint16_t MAXTIME = 10000;
+const uint16_t PERIOD = 1000;
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 static __IO uint32_t TimingDelay;
@@ -98,10 +107,10 @@ RCC_ClocksTypeDef RCC_Clocks;
 void TIM3_IRQHandler(void)
 {
 	TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
-	myTimer+=1000;
-	if (myTimer >= 11000)
+	myTimer += PERIOD;
+	if (myTimer == MAXTIME)
 	{
-		myTimer = 1000;
+		myTimer = 0;
 		flagTimerRestarted = 1;
 	}
 }
@@ -142,35 +151,27 @@ int main(void)
 
     /* Configure timer, Timing mode*/
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
-    TIM_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
-    TIM_TimeBaseInitStruct.TIM_Period = 999;			//Reload after 1s
+    TIM_TimeBaseInitStruct.TIM_Prescaler = PRESCALER;		//1000 Hz, i.e. timer is updated every 1ms.
+    TIM_TimeBaseInitStruct.TIM_Period = PERIOD - 1;		//Reload after 1s
     TIM_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
     //TIM_TimeBaseInitStruct.TIM_ClockDivision;
     TIM_TimeBaseInit(TIM3, &TIM_TimeBaseInitStruct);
 
     //Enable TIM3 interrupts
-    //DOES NOT WORK
     NVIC_EnableIRQ(TIM3_IRQn);
     TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
-
-    // Configure 10s timer, TIM6, timing mode
-//    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
-//    TIM6_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
-//    //TIM6_TimeBaseInitStruct.TIM_Period;
-//    TIM6_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
-//    //TIM6_TimeBaseInitStruct.TIM_ClockDivision;
-//    TIM_TimeBaseInit(TIM6, &TIM6_TimeBaseInitStruct);
   
 	/* Infinite loop */
     uint16_t startTime = 0, endTime = 0, pulseTime = 0, totalTime = 0, counts = 0, tim3Time = 0;
+    //float totalTimeF = 0.0f; //Something strange happens when using float
     TIM_SetCounter(TIM3, 0);
     TIM_Cmd(TIM3, ENABLE);
 	while (1)
 	{
 		//TEST of timer TIM3
-		Delay(1500);
-		tim3Time = TIM_GetCounter(TIM3);
-		printf("TIM3 and Time: %d\t%d\n", tim3Time, myTimer);
+//		Delay(1000);
+//		tim3Time = TIM_GetCounter(TIM3);
+//		printf("TIM3 and Time: %d\t%d\n", tim3Time, myTimer);
 		//END TEST
 
 		//Test for button and eventual bounce (50 ms)
@@ -178,11 +179,12 @@ int main(void)
 		if (flagButtonPressed && ((TIM_GetCounter(TIM3) > 50) || (TIM_GetCounter(TIM3) == 0)))
 		{
 			flagButtonPressed = 0;
-			if (bitInfo == 0)		//pushed
+			if (bitInfo == 0)				//pushed
 			{
 				tim3Time = TIM_GetCounter(TIM3);
 				startTime = myTimer + tim3Time;
-			} else				//released
+			//This is only done when key has been pressed
+			} else if (startTime != 0)		//released
 			{
 				tim3Time = TIM_GetCounter(TIM3);
 				endTime = myTimer + tim3Time;
@@ -198,10 +200,20 @@ int main(void)
 		if (flagTimerRestarted)
 		{
 			flagTimerRestarted = 0;
+			//totalTimeF = (float)totalTime/1000;
+			//Don't forget to calculate the last push if button is pressed when 10s is passed.
+			if (startTime != 0)
+			{
+				pulseTime = MAXTIME - startTime;
+				totalTime += pulseTime;
+				counts++;
+			}
 			printf("\n---RESULT---\n");
-			printf("Counts and Total Time: %d counts\t%d s\n", counts, totalTime/1000);
+			printf("Counts and Total Time: %d\t%ds and %dms\n\n", counts, totalTime/1000, totalTime%1000);
+			pulseTime = 0;
 			totalTime = 0;
 			counts = 0;
+			startTime = 0;
 		}
 	}
 }
