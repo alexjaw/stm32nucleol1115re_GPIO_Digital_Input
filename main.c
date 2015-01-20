@@ -3,6 +3,18 @@
   * file    main.c
   * author  A.Jaworowski
   *
+  * version	v1.2
+  * date	2015-01-20
+  * brief	Can measure during 10s
+  * This is made by making TIM3 as a 1000ms timer. Each time TIM3 reaches 1000ms,
+  * its restarted and a counter is updated. Every 10000ms, the counter is set to 0.
+  * Timing of the button is performed by reading TIM3 values.
+  *
+  * Issues: When the button is used, often I get time values from TIM3 > 1000, which
+  * should not be possible since its auto reloaded every 1000 ms.
+  *
+  * Solutions: V1.1. The problem was that I never enable NVIC for TIM3, now its done.
+  *
   * version V1.1
   * date	2015-01-18
   * brief	Measure the time that the button is pressed.
@@ -64,8 +76,9 @@
 /* Private variables ---------------------------------------------------------*/
 static __IO uint32_t TimingDelay;
 uint8_t BlinkSpeed = 0;
-uint8_t bitInfo;
+uint8_t bitInfo, flagTimerRestarted = 0;
 uint8_t flagButtonPressed, timerSeconds;
+uint16_t myTimer = 0;
 /* Private function prototypes -----------------------------------------------*/
 RCC_ClocksTypeDef RCC_Clocks;
 /* Private functions ---------------------------------------------------------*/
@@ -76,16 +89,20 @@ RCC_ClocksTypeDef RCC_Clocks;
   * @retval None
   */
 
+/**
+ * @brief	Increment myTimer every 1000ms, Restarts after 10s
+ * @param	None
+ * @note	-
+ * @retval	None
+ */
 void TIM3_IRQHandler(void)
 {
-	//Timer overflowed before pulse ended (Update interrupt)
-	if(TIM_GetITStatus(TIM3, TIM_IT_Update) != RESET)
+	TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+	myTimer+=1000;
+	if (myTimer >= 11000)
 	{
-		//Clear the pending interrupt bit
-		TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
-
-		//Set the TimerOverflow flag
-		timerSeconds++;
+		myTimer = 1000;
+		flagTimerRestarted = 1;
 	}
 }
 
@@ -133,55 +150,28 @@ int main(void)
 
     //Enable TIM3 interrupts
     //DOES NOT WORK
+    NVIC_EnableIRQ(TIM3_IRQn);
     TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
 
     // Configure 10s timer, TIM6, timing mode
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
-    TIM6_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
-    //TIM6_TimeBaseInitStruct.TIM_Period;
-    TIM6_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
-    //TIM6_TimeBaseInitStruct.TIM_ClockDivision;
-    TIM_TimeBaseInit(TIM6, &TIM6_TimeBaseInitStruct);
+//    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+//    TIM6_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
+//    //TIM6_TimeBaseInitStruct.TIM_Period;
+//    TIM6_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
+//    //TIM6_TimeBaseInitStruct.TIM_ClockDivision;
+//    TIM_TimeBaseInit(TIM6, &TIM6_TimeBaseInitStruct);
   
 	/* Infinite loop */
-    uint16_t pulseTime = 0;
-    uint16_t extraTime = 0;
+    uint16_t startTime = 0, endTime = 0, pulseTime = 0, totalTime = 0, counts = 0, tim3Time = 0;
     TIM_SetCounter(TIM3, 0);
+    TIM_Cmd(TIM3, ENABLE);
 	while (1)
 	{
 		//TEST of timer TIM3
-//		TIM_SetCounter(TIM3, 0);
-//		TIM_Cmd(TIM3, ENABLE);
-//		Delay(1000);
-//		//TIM_GenerateEvent(TIM3, TIM_EventSource_Update);
-//		TIM_Cmd(TIM3, DISABLE);
-//		pulseTime = TIM_GetCounter(TIM3);
-//		printf("Time: %d\n", pulseTime);
-//		if (flagTimerOverflow)
-//			printf("WARNING: flagTimerOverflow\n");
+		Delay(1500);
+		tim3Time = TIM_GetCounter(TIM3);
+		printf("TIM3 and Time: %d\t%d\n", tim3Time, myTimer);
 		//END TEST
-
-		//TEST of timer with button
-//		flagButtonPressed = 0;
-//		EXTI_GenerateSWInterrupt(EXTI_Line13);
-//		flagButtonPressed;
-//		if (bitInfo == 1)		//first 1
-//		{
-//			bitInfo = 0;
-//		}
-//		else
-//		{
-//			bitInfo = 1;
-//			Delay(1234);
-//		}
-		//END of test
-
-		if (flagTimerOverflow)
-		{
-			printf("WARNING: flagTimerOverflow\n");
-			flagTimerOverflow = 0;
-			extraTime += 5000;		//!!!!!!!!!!!Exactly when do we get overflow
-		}
 
 		//Test for button and eventual bounce (50 ms)
 		//However, when timer = 0, step into the condition
@@ -190,19 +180,28 @@ int main(void)
 			flagButtonPressed = 0;
 			if (bitInfo == 0)		//pushed
 			{
-				//Set timer to 0
-				TIM_SetCounter(TIM3, 0);
-				//Start timer
-				TIM_Cmd(TIM3, ENABLE);
+				tim3Time = TIM_GetCounter(TIM3);
+				startTime = myTimer + tim3Time;
 			} else				//released
 			{
-				//Stop timer
-				TIM_Cmd(TIM3, DISABLE);
-				pulseTime += TIM_GetCounter(TIM3);
-				printf("Time: %d\n", pulseTime);
-				TIM_SetCounter(TIM3, 0);
+				tim3Time = TIM_GetCounter(TIM3);
+				endTime = myTimer + tim3Time;
+				pulseTime = endTime - startTime;
+				totalTime += pulseTime;
+				counts++;
+				printf("Pulse and total Time: %d\t%d\n", pulseTime, totalTime);
+				endTime = 0;
+				startTime = 0;
+				pulseTime = 0;
 			}
-			//printf("Interrupt received from button pin. Bitstatus: %d\n", bitInfo);
+		}
+		if (flagTimerRestarted)
+		{
+			flagTimerRestarted = 0;
+			printf("\n---RESULT---\n");
+			printf("Counts and Total Time: %d counts\t%d s\n", counts, totalTime/1000);
+			totalTime = 0;
+			counts = 0;
 		}
 	}
 }
