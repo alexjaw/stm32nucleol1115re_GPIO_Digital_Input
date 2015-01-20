@@ -42,6 +42,7 @@
 extern uint8_t BlinkSpeed;
 extern uint8_t bitInfo;
 extern uint8_t flagButtonPressed;
+extern uint8_t flagTimerOverflow;
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 
@@ -168,6 +169,7 @@ void EXTI15_10_IRQHandler(void)
 	EXTI_ClearITPendingBit(EXTI_Line13);
   }
 }
+
 /**
   * @brief  This function handles PPP interrupt request.
   * @param  None

@@ -3,14 +3,24 @@
   * file    main.c
   * author  A.Jaworowski
   *
+  * version V1.1
+  * date	2015-01-18
+  * brief	Measure the time that the button is pressed.
+  * A timer is started when the button is pressed and stopped when released.
+  *
   * version V1.0
   * date	2015-01-18
   * brief	The very first example of digital input - blue button digital in.
   * The detection of the button (on PC13) is performed by connecting an interrupt
   * to the button I/O. Interrupts for GPIO are configured with EXTI and NVIC.
-  * The iterrupts are handled by handlers, it this case EXTI15_10_IRQHandler(),
+  * The interrupts are handled by handlers, it this case EXTI15_10_IRQHandler(),
   * in stm32l1xx_it.c
+  *
+  * Issues:
+  * - TIM3_IRQHandler does not work - the interrupt is never activated - why?
+  *
   * - ref: the ST-code in Utilities\STM32L152_Nucleo: STM_EVAL_PBInit()
+  *
   *
   * Debugging is done using ST-Link and SWV.
  *
@@ -55,7 +65,7 @@
 static __IO uint32_t TimingDelay;
 uint8_t BlinkSpeed = 0;
 uint8_t bitInfo;
-uint8_t flagButtonPressed;
+uint8_t flagButtonPressed, timerSeconds;
 /* Private function prototypes -----------------------------------------------*/
 RCC_ClocksTypeDef RCC_Clocks;
 /* Private functions ---------------------------------------------------------*/
@@ -65,11 +75,26 @@ RCC_ClocksTypeDef RCC_Clocks;
   * @param  None
   * @retval None
   */
+
+void TIM3_IRQHandler(void)
+{
+	//Timer overflowed before pulse ended (Update interrupt)
+	if(TIM_GetITStatus(TIM3, TIM_IT_Update) != RESET)
+	{
+		//Clear the pending interrupt bit
+		TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+
+		//Set the TimerOverflow flag
+		timerSeconds++;
+	}
+}
+
 int main(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
     EXTI_InitTypeDef EXTI_InitStructure;
     NVIC_InitTypeDef NVIC_InitStructure;
+    TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStruct, TIM6_TimeBaseInitStruct;
 
 	/* SysTick end of count event each 1ms */
 	RCC_GetClocksFreq(&RCC_Clocks);
@@ -97,14 +122,87 @@ int main(void)
     NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
+
+    /* Configure timer, Timing mode*/
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+    TIM_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
+    TIM_TimeBaseInitStruct.TIM_Period = 999;			//Reload after 1s
+    TIM_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
+    //TIM_TimeBaseInitStruct.TIM_ClockDivision;
+    TIM_TimeBaseInit(TIM3, &TIM_TimeBaseInitStruct);
+
+    //Enable TIM3 interrupts
+    //DOES NOT WORK
+    TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
+
+    // Configure 10s timer, TIM6, timing mode
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+    TIM6_TimeBaseInitStruct.TIM_Prescaler = 32000;		//1000 Hz, i.e. timer is updated every 1ms.
+    //TIM6_TimeBaseInitStruct.TIM_Period;
+    TIM6_TimeBaseInitStruct.TIM_CounterMode = TIM_CounterMode_Up;
+    //TIM6_TimeBaseInitStruct.TIM_ClockDivision;
+    TIM_TimeBaseInit(TIM6, &TIM6_TimeBaseInitStruct);
   
 	/* Infinite loop */
+    uint16_t pulseTime = 0;
+    uint16_t extraTime = 0;
+    TIM_SetCounter(TIM3, 0);
 	while (1)
 	{
-		if (flagButtonPressed)
+		//TEST of timer TIM3
+//		TIM_SetCounter(TIM3, 0);
+//		TIM_Cmd(TIM3, ENABLE);
+//		Delay(1000);
+//		//TIM_GenerateEvent(TIM3, TIM_EventSource_Update);
+//		TIM_Cmd(TIM3, DISABLE);
+//		pulseTime = TIM_GetCounter(TIM3);
+//		printf("Time: %d\n", pulseTime);
+//		if (flagTimerOverflow)
+//			printf("WARNING: flagTimerOverflow\n");
+		//END TEST
+
+		//TEST of timer with button
+//		flagButtonPressed = 0;
+//		EXTI_GenerateSWInterrupt(EXTI_Line13);
+//		flagButtonPressed;
+//		if (bitInfo == 1)		//first 1
+//		{
+//			bitInfo = 0;
+//		}
+//		else
+//		{
+//			bitInfo = 1;
+//			Delay(1234);
+//		}
+		//END of test
+
+		if (flagTimerOverflow)
+		{
+			printf("WARNING: flagTimerOverflow\n");
+			flagTimerOverflow = 0;
+			extraTime += 5000;		//!!!!!!!!!!!Exactly when do we get overflow
+		}
+
+		//Test for button and eventual bounce (50 ms)
+		//However, when timer = 0, step into the condition
+		if (flagButtonPressed && ((TIM_GetCounter(TIM3) > 50) || (TIM_GetCounter(TIM3) == 0)))
 		{
 			flagButtonPressed = 0;
-			printf("Interrupt received from button pin. Bitstatus: %d\n", bitInfo);
+			if (bitInfo == 0)		//pushed
+			{
+				//Set timer to 0
+				TIM_SetCounter(TIM3, 0);
+				//Start timer
+				TIM_Cmd(TIM3, ENABLE);
+			} else				//released
+			{
+				//Stop timer
+				TIM_Cmd(TIM3, DISABLE);
+				pulseTime += TIM_GetCounter(TIM3);
+				printf("Time: %d\n", pulseTime);
+				TIM_SetCounter(TIM3, 0);
+			}
+			//printf("Interrupt received from button pin. Bitstatus: %d\n", bitInfo);
 		}
 	}
 }
